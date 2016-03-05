@@ -6,6 +6,8 @@
  * 2) Implement the three functions getInformation, registerStudent
  *    and unregisterStudent.
  */
+import org.postgresql.util.PSQLException;
+
 import java.sql.*; // JDBC stuff.
 import java.util.Properties;
 import java.util.Scanner;
@@ -41,11 +43,13 @@ public class StudentPortal
 
             String student = args[0]; // This is the identifier for the student.
 
-            Console console = System.console();
+            Scanner scanner = new Scanner(System.in);
+            //Console console = System.console();
             usage();
             System.out.println("Welcome!");
             while(true) {
-                String mode = console.readLine("? > ");
+                String mode = scanner.nextLine();
+                //String mode = console.readLine("? > ");
                 String[] cmd = mode.split(" +");
                 cmd[0] = cmd[0].toLowerCase();
                 if ("information".startsWith(cmd[0]) && cmd.length == 1) {
@@ -80,7 +84,75 @@ public class StudentPortal
      */
     static void getInformation(Connection conn, String student) throws SQLException
     {
-        // TODO: Your implementation here
+        System.out.println("Information for student " + student);
+        System.out.println("-------------------------------------");
+
+        PreparedStatement statement = conn.prepareStatement("SELECT * FROM StudentsFollowing WHERE idnbr = ?");
+        statement.setString(1, student);
+        ResultSet rs = statement.executeQuery();
+
+        if (rs.next()) {
+            System.out.println("Name: " + rs.getString("name"));
+            System.out.println("Student ID: " + rs.getString("loginid"));
+            System.out.println("Programme: " + rs.getString("programme"));
+            if (rs.getString("branch") != null)
+                System.out.println("Branch: " + rs.getString("branch"));
+        }
+        rs.close();
+        statement.close();
+
+        statement = conn.prepareStatement("SELECT * FROM FinishedCourses WHERE studentid = ?");
+        statement.setString(1, student);
+        rs = statement.executeQuery();
+
+        System.out.println();
+        System.out.println("Read courses (code, credits: grade):");
+        while (rs.next()) {
+            System.out.printf("%s, %.1fp: %s\n", rs.getString("course"), rs.getDouble("credits"), rs.getString("grade"));
+        }
+        rs.close();
+        statement.close();
+
+        statement = conn.prepareStatement("SELECT * FROM Registrations WHERE student = ?");
+        statement.setString(1, student);
+        rs = statement.executeQuery();
+
+        System.out.println();
+        System.out.println("Registered courses (code: status):");
+        while (rs.next()) {
+            String status = rs.getString("status");
+            String course = rs.getString("course");
+            if (status.equals("waiting")) {
+                PreparedStatement positionStatement = conn.prepareStatement("SELECT queuePosition FROM CourseQueuePositions WHERE student = ? AND course = ?");
+                positionStatement.setString(1, student);
+                positionStatement.setString(2, course);
+                ResultSet posRS = positionStatement.executeQuery();
+                if (posRS.next())
+                    status += " as nr " + posRS.getInt(1);
+                posRS.close();
+                positionStatement.close();
+            }
+
+            System.out.printf("%s: %s\n", course, status);
+        }
+        rs.close();
+        statement.close();
+
+        System.out.println();
+        statement = conn.prepareStatement("SELECT * FROM PathToGraduation WHERE studentid = ?");
+        statement.setString(1, student);
+        rs = statement.executeQuery();
+
+        if (rs.next()) {
+            System.out.println("Seminar courses taken: " + rs.getInt("seminarcourses"));
+            System.out.println("Math credits taken: " + rs.getDouble("mathcredits"));
+            System.out.println("Research credits taken: " + rs.getDouble("researchcredits"));
+            System.out.println("Total credits taken: " + rs.getDouble("totalcredits"));
+            System.out.println("Fulfills the requirements for graduation: " + rs.getBoolean("cangraduate"));
+            System.out.println("-------------------------------------");
+        }
+        rs.close();
+        statement.close();
     }
 
     /* Register: Given a student id number and a course code, this function
@@ -89,7 +161,28 @@ public class StudentPortal
     static void registerStudent(Connection conn, String student, String course)
             throws SQLException
     {
-        // TODO: Your implementation here
+        PreparedStatement registerStatement = conn.prepareStatement("INSERT INTO Registrations VALUES (?, ?);");
+        registerStatement.setString(1, student);
+        registerStatement.setString(2, course);
+
+        try {
+            registerStatement.executeUpdate();
+            PreparedStatement checkStatement = conn.prepareStatement("SELECT status FROM Registrations WHERE student = ? AND course = ?;");
+            checkStatement.setString(1, student);
+            checkStatement.setString(2, course);
+
+            ResultSet rs = checkStatement.executeQuery();
+            if (rs.next()) {
+                System.out.println(rs.getString(1).equals("registered") ?
+                        "You are now successfully registered to course " + course + "!" :
+                        "Course " + course + " is full, you are put in the waiting list.");
+            }
+            checkStatement.close();
+        } catch (PSQLException e) {
+            System.out.println("Failed to register to course " + course + ".");
+        } finally {
+            registerStatement.close();
+        }
     }
 
     /* Unregister: Given a student id number and a course code, this function
@@ -98,6 +191,13 @@ public class StudentPortal
     static void unregisterStudent(Connection conn, String student, String course)
             throws SQLException
     {
-        // TODO: Your implementation here
+        PreparedStatement unregisterStatement = conn.prepareStatement("DELETE FROM Registrations WHERE student = ? AND course = ?");
+        unregisterStatement.setString(1, student);
+        unregisterStatement.setString(2, course);
+
+        unregisterStatement.executeUpdate();
+        unregisterStatement.close();
+
+        System.out.println("You have successfully been unregistered or removed from waiting list for course " + course + "!");
     }
 }
